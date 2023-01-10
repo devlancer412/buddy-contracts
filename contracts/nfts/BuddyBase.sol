@@ -3,12 +3,15 @@
 pragma solidity ^0.8.0;
 
 import "../interfaces/IBuddy.sol";
+import "../interfaces/IDiamond.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "erc721a/contracts/ERC721A.sol";
 
 contract BuddyBase is IBuddy, ERC721A, Ownable {
   using Strings for uint256;
+  using SafeERC20 for IERC20;
 
   struct BuddyAttribute {
     uint256 level;
@@ -22,6 +25,11 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
     uint256 upperBodyStrength;
     uint256 lowerBodyStrength;
     uint256 coreStrength;
+    // diamond inject settings
+    uint256 slot1;
+    uint256 slot2;
+    uint256 slot3;
+    uint256 slot4;
   }
 
   bool public saleIsActive = true;
@@ -36,6 +44,7 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
   string public uriSuffix = ".json";
 
   address public immutable usdc;
+  address public immutable diamond;
 
   // nft attributes
   mapping(uint256 => BuddyAttribute) private attributes;
@@ -47,6 +56,7 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
    * @param price Initial Price | precision:18
    * @param maxSupply Maximum # of NFTs
    * @param _usdc address of usdc
+   * @param _diamond address of usdc
    */
   constructor(
     string memory _name,
@@ -54,13 +64,15 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
     string memory _uri,
     uint256 price,
     uint256 maxSupply,
-    address _usdc
+    address _usdc,
+    address _diamond
   ) payable ERC721A(_name, _symbol) {
     currentPrice = price;
     MAX_SUPPLY = maxSupply;
     hiddenMetadataUri = _uri;
 
     usdc = _usdc;
+    diamond = _diamond;
   }
 
   /**
@@ -69,12 +81,13 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
    * sufficient payable value is sent.
    * @param amount The number of NFTs to mint.
    */
-  function mint(uint256 amount) external payable {
+  function mint(uint256 amount) external {
     uint256 ts = totalSupply();
 
     require(saleIsActive, "BuddyBase: Sale must be active to mint tokens");
     require(ts + amount <= MAX_SUPPLY, "BuddyBase: Purchase would exceed max tokens");
-    require(currentPrice * amount == msg.value, "BuddyBase: Value sent is not correct");
+
+    IERC20(usdc).safeTransferFrom(msg.sender, address(this), currentPrice * amount);
 
     _safeMint(msg.sender, amount);
   }
@@ -95,7 +108,8 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
    * @dev A way for the owner to withdraw all proceeds from the sale.
    */
   function withdraw() external onlyOwner {
-    payable(owner()).transfer(address(this).balance);
+    uint256 balance = IERC20(usdc).balanceOf(address(this));
+    IERC20(usdc).safeTransfer(msg.sender, balance);
   }
 
   /**
@@ -194,5 +208,112 @@ contract BuddyBase is IBuddy, ERC721A, Ownable {
     }
 
     emit UpdatedAttribute(_tokenId, _attribute, _value);
+  }
+
+  /**
+   * @dev inject diamond to buddy
+   * @param _diamondId id of diamond
+   * @param _buddyId id of budddy
+   * @param _slotId id of slot
+   * @param _sig signature of owner
+   */
+  function injectDiamond(
+    uint256 _diamondId,
+    uint256 _buddyId,
+    uint256 _slotId,
+    Sig calldata _sig
+  ) external returns (bool) {
+    require(_isValid(_diamondId, _buddyId, _slotId, _sig), "BuddyBase: Invalid signature");
+    require(ownerOf(_buddyId) == msg.sender, "BuddyBase: Invalid buddy id");
+    require(IERC721A(diamond).ownerOf(_diamondId) == msg.sender, "BuddyBase: Invalid diamond id");
+
+    if (_slotId == 1) {
+      if (attributes[_buddyId].slot1 != 0) {
+        _rejectDiamond(attributes[_buddyId].slot1, _buddyId, _slotId);
+      }
+
+      attributes[_buddyId].slot1 = _diamondId;
+    } else if (_slotId == 2) {
+      if (attributes[_buddyId].slot2 != 0) {
+        _rejectDiamond(attributes[_buddyId].slot2, _buddyId, _slotId);
+      }
+
+      attributes[_buddyId].slot2 = _diamondId;
+    } else if (_slotId == 3) {
+      if (attributes[_buddyId].slot3 != 0) {
+        _rejectDiamond(attributes[_buddyId].slot3, _buddyId, _slotId);
+      }
+
+      attributes[_buddyId].slot3 = _diamondId;
+    } else if (_slotId == 4) {
+      if (attributes[_buddyId].slot4 != 0) {
+        _rejectDiamond(attributes[_buddyId].slot4, _buddyId, _slotId);
+      }
+
+      attributes[_buddyId].slot4 = _diamondId;
+    } else {
+      revert("BuddyBase: Invalid slot id");
+    }
+
+    emit DiamondInject(_slotId, _diamondId, _buddyId);
+    return true;
+  }
+
+  /**
+   * @dev reject diamond to buddy
+   * @param _diamondId id of diamond
+   * @param _buddyId id of budddy
+   * @param _slotId id of slot
+   * @param _sig signature of owner
+   */
+  function rejectDiamond(
+    uint256 _diamondId,
+    uint256 _buddyId,
+    uint256 _slotId,
+    Sig calldata _sig
+  ) external returns (bool) {
+    require(_isValid(_diamondId, _buddyId, _slotId, _sig), "BuddyBase: Invalid signature");
+    require(_slotId > 0 && _slotId < 5, "BuddyBase: Invalid slot id");
+    require(ownerOf(_buddyId) == msg.sender, "BuddyBase: Invalid buddy id");
+    require(IERC721A(diamond).ownerOf(_diamondId) == msg.sender, "BuddyBase: Invalid diamond id");
+
+    _rejectDiamond(_diamondId, _buddyId, _slotId);
+
+    return true;
+  }
+
+  function _rejectDiamond(uint256 _diamondId, uint256 _buddyId, uint256 _slotId) private {
+    if (_slotId == 1) {
+      IDiamond(diamond).rejectBuddy(_buddyId, _diamondId);
+      attributes[_buddyId].slot1 = 0;
+    } else if (_slotId == 2) {
+      IDiamond(diamond).rejectBuddy(_buddyId, _diamondId);
+      attributes[_buddyId].slot2 = 0;
+    } else if (_slotId == 3) {
+      IDiamond(diamond).rejectBuddy(_buddyId, _diamondId);
+      attributes[_buddyId].slot3 = 0;
+    } else if (_slotId == 4) {
+      IDiamond(diamond).rejectBuddy(_buddyId, _diamondId);
+      attributes[_buddyId].slot4 = 0;
+    } else {
+      revert("BuddyBase: Invalid slot id");
+    }
+  }
+
+  // function:    validates buy function variables
+  // @return    ture -> valid, false -> invalid
+  function _isValid(
+    uint256 _diamondId,
+    uint256 _buddyId,
+    uint256 _slotId,
+    Sig calldata _sig
+  ) private view returns (bool) {
+    bytes32 messageHash = keccak256(abi.encodePacked(_msgSender(), _diamondId, _buddyId, _slotId));
+
+    bytes32 ethSignedMessageHash = keccak256(
+      abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
+    );
+
+    return owner() == ecrecover(ethSignedMessageHash, _sig.v, _sig.r, _sig.s);
   }
 }

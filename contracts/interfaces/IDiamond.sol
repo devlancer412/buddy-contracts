@@ -29,7 +29,31 @@ interface IDiamond {
   }
 
   /**
-   * @dev emit when buddy initialized
+   * @dev fire when buddy initialized
    */
   event Initailized(address og, address yg);
+
+  /**
+   * @dev fire when buddy injected to buddy
+   */
+  event BuddyInject(uint256 diamondId, uint256 buddyId);
+
+  /**
+   * @dev fire when buddy rejected from buddy
+   */
+  event BuddyReject(uint256 diamondId, uint256 buddyId);
+
+  /**
+   * @dev inject buddy to diamond
+   * @param _buddyId id of budddy
+   * @param _diamondId id of diamond
+   */
+  function injectBuddy(uint256 _buddyId, uint256 _diamondId) external returns (bool);
+
+  /**
+   * @dev reject buddy to diamond
+   * @param _buddyId id of budddy
+   * @param _diamondId id of diamond
+   */
+  function rejectBuddy(uint256 _buddyId, uint256 _diamondId) external returns (bool);
 }

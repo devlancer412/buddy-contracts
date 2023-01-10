@@ -27,6 +27,8 @@ contract Diamond is IDiamond, ERC721A, Ownable {
   string private _baseURIextended;
   string public uriSuffix = ".json";
 
+  mapping(uint256 => DiamondAttribute) public attributes;
+
   /**
    * @param _uri Token URI used for metadata
    */
@@ -34,8 +36,13 @@ contract Diamond is IDiamond, ERC721A, Ownable {
     _baseURIextended = _uri;
   }
 
-  modifier afterInitalized() {
+  modifier afterInitialized() {
     require(og != address(0) || yg != address(0), "Diamond: Not initialized yet");
+    _;
+  }
+
+  modifier onlyBuddy() {
+    require(msg.sender == og || msg.sender == yg, "Diamond: Invalid buddy");
     _;
   }
 
@@ -77,7 +84,13 @@ contract Diamond is IDiamond, ERC721A, Ownable {
     string memory currentBaseURI = _baseURI();
     return
       bytes(currentBaseURI).length > 0
-        ? string(abi.encodePacked(currentBaseURI, _tokenId.toString(), uriSuffix))
+        ? string(
+          abi.encodePacked(
+            currentBaseURI,
+            (uint256(attributes[_tokenId].diamondType) + 1).toString(),
+            uriSuffix
+          )
+        )
         : "";
   }
 
@@ -87,5 +100,53 @@ contract Diamond is IDiamond, ERC721A, Ownable {
    */
   function setUriSuffix(string memory _uriSuffix) external onlyOwner {
     uriSuffix = _uriSuffix;
+  }
+
+  /**
+   * @dev A way for the owner to reserve a specifc number of NFTs without having to
+   * interact with the sale.
+   * @param to The address to send reserved NFTs to.
+   * @param amount The number of NFTs to reserve.
+   */
+  function reserve(address to, uint256 amount) external onlyOwner {
+    _safeMint(to, amount);
+  }
+
+  /**
+   * @dev Inject diamond to buddy (this function only called from buddy contract)
+   * @param _buddyId id of buddy
+   * @param _diamondId id of diamond
+   */
+  function injectBuddy(
+    uint256 _buddyId,
+    uint256 _diamondId
+  ) external afterInitialized onlyBuddy returns (bool) {
+    attributes[_diamondId].buddyAddress = msg.sender;
+    attributes[_diamondId].tokenId = _buddyId;
+
+    emit BuddyInject(_diamondId, _buddyId);
+    return true;
+  }
+
+  /**
+   * @dev Reject diamond to buddy (this function only called from buddy contract)
+   * @param _buddyId id of buddy
+   * @param _diamondId id of diamond
+   */
+  function rejectBuddy(
+    uint256 _buddyId,
+    uint256 _diamondId
+  ) external afterInitialized onlyBuddy returns (bool) {
+    require(
+      attributes[_diamondId].buddyAddress == msg.sender,
+      "Diamond: Invalid buddy contract address"
+    );
+    require(attributes[_diamondId].tokenId == _diamondId, "Diamond: Invalid buddy token id");
+
+    attributes[_diamondId].buddyAddress = address(0);
+    attributes[_diamondId].tokenId = 0;
+
+    emit BuddyReject(_diamondId, _buddyId);
+    return true;
   }
 }
